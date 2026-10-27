@@ -16,7 +16,7 @@
   --go:#EDEDED;
   --go-ink:#000000;
   --accent:#F5B041;
-  --font-body:'Figtree','Segoe UI',system-ui,-apple-system,sans-serif;
+  --font-body:'Figtree','Noto Sans Devanagari','Mukta','Segoe UI',system-ui,-apple-system,sans-serif;
   --font-mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
   color-scheme:dark;
 }
@@ -200,6 +200,8 @@ textarea.mono{font-family:var(--font-mono);font-size:12px;min-height:100px}
       <div id="s-brain" class="stack" hidden>
         <div class="card stack">
           <p class="hint" id="vline"></p>
+          <label class="sr" for="miclang">Voice language</label>
+          <select id="miclang" class="namebox"><option value="">Voice: auto</option><option value="en-IN">Voice: English</option><option value="hi-IN">Voice: Hindi / Hinglish</option><option value="mr-IN">Voice: Marathi</option></select>
           <label class="sr" for="name">Its name</label>
           <input id="name" class="namebox" placeholder="Give it a name" maxlength="24" autocomplete="off">
         </div>
@@ -286,6 +288,11 @@ var $=function(s){return document.querySelector(s)};
 var KEY='newborn-mind-v1';
 var STOP=new Set('a an the is are was were am be been to of and or in on at for with it this that these those i you he she we they me my your do does did what who where when why how which can could will would should as by from if then so but not no yes'.split(' '));
 
+('main mai mein hoon hun hu hai hain ho hota hoti hote tha thi ka ki ke ko se pe aur ya bhi toh nahi nahin nhi na kya kaun kaise kahan kab kyun kyon kitna kitni kitne ye yeh woh wo yah vah mera meri mere tera teri tere tum tumhara aap aapka apna hum hamara mujhe mujhko tujhe isko usko kuch koi sab bahut ek liye lie ne raha rahi rahe hoga hogi gaya gayi gaye kar karna karta karti '+
+'mi mala majha maza majhi mazi majhe maze tu tula tuza tujha ti aahe ahe aahet ahet aahes ahes ani va pan kay kon kuthe kadhi kasa kashi kase kiti ha he tya ya madhe '+
+'मैं मै हूँ हूं हु है हैं हो होता होती होते था थी थे का की के को से में पर और या भी तो नहीं न क्या कौन कैसे कहाँ कहां कब क्यों कितना कितनी कितने ये यह वो वह इस उस मेरा मेरी मेरे तेरा तुम आप हम हमारा मुझे कुछ कोई सब बहुत एक लिए ने रहा रही रहे गया गयी गए कर '+
+'मी मला माझा माझी माझे तू तुला तुझा तो ती ते आहे आहेत आहेस आहात आणि व की पण काय कोण कुठे कधी का कसा कशी कसे किती हा ही हे त्या या मध्ये ला ना नाही').split(' ').forEach(function(w){STOP.add(w);});
+
 function h(tag,attrs){
   var e=document.createElement(tag);
   if(attrs){for(var k in attrs){var v=attrs[k];
@@ -302,7 +309,7 @@ function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
 function pick(a){return a[Math.floor(Math.random()*a.length)];}
 
 /* ---------- memory ---------- */
-function fresh(){return {born:Date.now(),name:'',user:'',sentences:[],qa:[],skills:[],notes:[],todos:[],words:{},chat:[],runs:[],lessons:[],archive:[],viewFrom:0,pending:null};}
+function fresh(){return {born:Date.now(),name:'',user:'',sentences:[],qa:[],skills:[],notes:[],todos:[],words:{},chat:[],runs:[],lessons:[],archive:[],viewFrom:0,pending:null,mood:null};}
 function load(){try{var r=localStorage.getItem(KEY);if(r){return Object.assign(fresh(),JSON.parse(r));}}catch(e){}return fresh();}
 var brain=load();
 var warned=false;
@@ -311,44 +318,97 @@ var toastTimer;
 function toast(t){var el=$('#toast');el.textContent=t;el.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(function(){el.hidden=true;},3500);}
 
 /* ---------- language basics ---------- */
-function stem(w){
-  w=w.replace(/'s$/,'');
-  if(w.length>4&&/ies$/.test(w))return w.slice(0,-3)+'y';
-  if(w.length>5&&/ing$/.test(w))return w.slice(0,-3);
-  if(w.length>4&&/ed$/.test(w))return w.slice(0,-2);
-  if(w.length>3&&/s$/.test(w)&&!/ss$/.test(w))return w.slice(0,-1);
-  return w;
+var DC={'क':'k','ख':'kh','ग':'g','घ':'gh','ङ':'n','च':'ch','छ':'ch','ज':'j','झ':'jh','ञ':'n','ट':'t','ठ':'th','ड':'d','ढ':'dh','ण':'n','त':'t','थ':'th','द':'d','ध':'dh','न':'n','प':'p','फ':'ph','ब':'b','भ':'bh','म':'m','य':'y','र':'r','ल':'l','ळ':'l','व':'v','श':'sh','ष':'sh','स':'s','ह':'h'};
+var DV={'अ':'a','आ':'a','इ':'i','ई':'i','उ':'u','ऊ':'u','ऋ':'ri','ए':'e','ऐ':'ai','ओ':'o','औ':'au','ऑ':'o'};
+var DM={'ा':'a','ि':'i','ी':'i','ु':'u','ू':'u','ृ':'ri','े':'e','ै':'ai','ो':'o','ौ':'au','ॉ':'o'};
+var DSUF=['ांमध्ये','ामध्ये','मध्ये','ांना','ाला','ाचा','ाची','ाचे','ाने','ांनी','ीला','ीत','ात','ों','ें','ाओं','ाएं','ियाँ','ियां','ाँ','ां'].sort(function(a,b){return b.length-a.length;});
+function xlit(w){
+  var out='',cs=Array.from(w.normalize('NFC'));
+  cs.forEach(function(c){
+    if(DC[c]!==undefined)out+=DC[c]+'\u0001';
+    else if(DV[c]!==undefined)out+=DV[c];
+    else if(DM[c]!==undefined)out=out.replace(/\u0001$/,'')+DM[c];
+    else if(c==='\u094D')out=out.replace(/\u0001$/,'');
+    else if(c==='\u0902'||c==='\u0901')out+='n';
+    else if(c==='\u0903')out+='h';
+    else if(c==='\u093C'){}
+    else out+=c;
+  });
+  return out.replace(/\u0001$/,'').replace(/\u0001/g,'a');
 }
-function raw(t){return (t.toLowerCase().match(/[\p{L}\p{N}']+/gu)||[]);}
+/* one spelling skeleton for Roman and Devanagari: theek/thik/ठीक, hoon/hun/हूँ, mein/main/मैं all collapse together */
+function romNorm(w){return w.replace(/ph/g,'f').replace(/z/g,'j').replace(/w/g,'v').replace(/ee|ii/g,'i').replace(/oo|uu/g,'u').replace(/aa/g,'a').replace(/ei/g,'ai').replace(/ou/g,'au').replace(/(.)\1+/g,'$1');}
+function stem(w){
+  if(/[\u0900-\u097F]/.test(w)){
+    for(var i=0;i<DSUF.length;i++){var sf=DSUF[i];if(w.length>sf.length+1&&w.slice(-sf.length)===sf){w=w.slice(0,-sf.length);break;}}
+    return romNorm(xlit(w));
+  }
+  w=w.replace(/'s$/,'');
+  if(w.length>4&&/ies$/.test(w))w=w.slice(0,-3)+'y';
+  else if(w.length>5&&/ing$/.test(w))w=w.slice(0,-3);
+  else if(w.length>4&&/ed$/.test(w))w=w.slice(0,-2);
+  else if(w.length>3&&/s$/.test(w)&&!/ss$/.test(w))w=w.slice(0,-1);
+  return romNorm(w);
+}
+function raw(t){return (t.toLowerCase().match(/[\p{L}\p{M}\p{N}']+/gu)||[]);}
 function content(t){return raw(t).filter(function(w){return !STOP.has(w);}).map(stem);}
-function norm(t){return t.toLowerCase().replace(/[^\p{L}\p{N} ]/gu,'').replace(/\s+/g,' ').trim();}
-function isQ(t){return /\?\s*$/.test(t)||/^(what|who|where|when|why|how|which|whose|is|are|do|does|did|can|could|will|would|should)\b/i.test(t.trim());}
-function splitSentences(text){return text.replace(/\r/g,'').split(/(?<=[.!?])\s+|\n+/).map(function(s){return s.trim();}).filter(Boolean);}
+function norm(t){return t.toLowerCase().replace(/[^\p{L}\p{M}\p{N} ]/gu,'').replace(/\s+/g,' ').trim();}
+var QWH=new Set('kya kaun kaise kaisa kaisi kahan kab kyun kyu kyon kitna kitni kitne kisne kisko kaunsa kaunsi kay kon kuthe kadhi kasa kashi kase kiti क्या कौन कैसे कैसा कैसी कहाँ कहां कब क्यों क्यूँ कितना कितनी कितने किसने किसको कौनसा काय कोण कुठे कधी कसा कशी कसे किती'.split(' '));
+function isQ(t){return /\?\s*$/.test(t)||/^(what|who|where|when|why|how|which|whose|is|are|do|does|did|can|could|will|would|should)\b/i.test(t.trim())||raw(t).some(function(w){return QWH.has(w);});}
+function splitSentences(text){return text.replace(/\r/g,'').split(/(?<=[.!?\u0964\u0965])\s+|\n+/).map(function(s){return s.trim();}).filter(Boolean);}
 
 /* ---------- retrieval ---------- */
 var idx=null;
 function index(){
   if(idx&&idx.n===brain.sentences.length)return idx;
-  var df={};
-  var docs=brain.sentences.map(function(s){var set=new Set(content(s.t));set.forEach(function(w){df[w]=(df[w]||0)+1;});return set;});
-  idx={n:brain.sentences.length,df:df,docs:docs};
+  var df={},tf=[],dl=[],tot=0;
+  var docs=brain.sentences.map(function(s){
+    var toks=content(s.t),f={};
+    toks.forEach(function(w){f[w]=(f[w]||0)+1;});
+    var set=new Set(toks);set.forEach(function(w){df[w]=(df[w]||0)+1;});
+    tf.push(f);dl.push(toks.length);tot+=toks.length;return set;
+  });
+  idx={n:brain.sentences.length,df:df,docs:docs,tf:tf,dl:dl,avg:(tot/(docs.length||1))||1,vocab:Object.keys(df)};
   return idx;
 }
-function idf(w,ix){return Math.log(1+(ix.n+1)/(1+(ix.df[w]||0)));}
+/* BM25 inverse document frequency: rare words weigh more */
+function idf(w,ix){var d=ix.df[w]||0;return Math.log(1+(ix.n-d+0.5)/(d+0.5));}
+/* nearest known word for a misspelled one (sadd, recieve, photsynthesis) */
+function fuzzy(w,ix){
+  if(w.length<4)return null;
+  var th=w.length<=6?1:2,best=null,bd=9;
+  for(var i=0;i<ix.vocab.length;i++){
+    var v=ix.vocab[i];
+    if(v.charAt(0)!==w.charAt(0)||Math.abs(v.length-w.length)>th)continue;
+    var d=osa(w,v);if(d<=th&&d<bd){bd=d;best=v;}
+  }
+  return best;
+}
+/* BM25 (k1=1.5, b=0.75) blended with weighted query coverage. cov stays 0..1 so existing thresholds still work. */
 function search(q,k){
   var ix=index();
   var qt=Array.from(new Set(content(q)));
   if(!qt.length||!ix.n)return {hits:[],unknown:qt};
-  var known=qt.filter(function(w){return ix.df[w];});
-  var unknown=qt.filter(function(w){return !ix.df[w];});
+  var known=[],unknown=[];
+  qt.forEach(function(w){
+    if(ix.df[w]){if(known.indexOf(w)<0)known.push(w);return;}
+    var f=fuzzy(w,ix);
+    if(f){if(known.indexOf(f)<0)known.push(f);}else unknown.push(w);
+  });
   if(!known.length)return {hits:[],unknown:unknown};
   var tot=known.reduce(function(a,w){return a+idf(w,ix);},0)+0.35*unknown.reduce(function(a,w){return a+idf(w,ix);},0);
-  var out=[];
+  var K1=1.5,B=0.75,out=[],mx=0;
   ix.docs.forEach(function(d,i){
-    var sc=0;known.forEach(function(w){if(d.has(w))sc+=idf(w,ix);});
-    if(sc>0)out.push({i:i,s:brain.sentences[i],sc:sc,cov:sc/tot});
+    var sc=0,bm=0;
+    known.forEach(function(w){
+      if(!d.has(w))return;
+      var f=ix.tf[i][w],wi=idf(w,ix);
+      sc+=wi;bm+=wi*f*(K1+1)/(f+K1*(1-B+B*ix.dl[i]/ix.avg));
+    });
+    if(sc>0){out.push({i:i,s:brain.sentences[i],sc:sc,bm:bm,cov:sc/tot});if(bm>mx)mx=bm;}
   });
-  out.sort(function(a,b){return b.cov-a.cov||b.sc-a.sc;});
+  out.forEach(function(o){o.rank=0.6*o.cov+0.4*(o.bm/mx);});
+  out.sort(function(a,b){return b.rank-a.rank||b.sc-a.sc;});
   return {hits:out.slice(0,k||3),unknown:unknown};
 }
 function qaMatch(q){
@@ -384,6 +444,7 @@ function learn(text,src){
   var added=0,newWords=[];
   var m;
   if((m=text.match(/\bmy name is ([\p{L}'-]+)/iu)))brain.user=cap(m[1]);
+  if((m=text.match(/(?:mera naam|mera nam|majha naav|maza naav|मेरा नाम|माझं नाव|माझे नाव)\s+([\p{L}\p{M}'-]+)/iu)))brain.user=cap(m[1]);
   if((m=text.match(/\b(?:your name is|i(?:'ll| will) call you|let's call you) ([\p{L}'-]+)/iu))){brain.name=cap(m[1]);$('#name').value=brain.name;}
   splitSentences(text).slice(0,2500).forEach(function(s){
     if(s.length<2||s.length>500||isQ(s))return;
@@ -413,11 +474,47 @@ function ago(ms){
   var d=Math.floor(hr/24);return d+' days old';
 }
 
+
+/* ---------- languages: Hindi, Hinglish (Roman Hindi), Marathi ---------- */
+var HI_R=new Set('main mai mein hoon hun hu hai hain ho tha thi ka ki ke ko se aur bhi nahi nahin nhi kya kaun kaise kahan kab kyun kyon kitna ye yeh woh wo mera meri mere tum tumhara aap aapka hum mujhe kuch koi bahut accha acha achha thik theek hoga raha rahi rahe kar karo bolo batao'.split(' '));
+var MR_R=new Set('mi mala majha maza majhi mazi tu tula tuza aahe ahe aahet ahet aahes ani kay kon kuthe kadhi kasa kashi kiti pan tumhi tumhala'.split(' '));
+var curLang='en';
+function detectLang(t){
+  var x=t.trim();
+  if(/[\u0900-\u097F]/.test(x)){
+    if(/^(?:नमस्कार|प्रणाम)/.test(x))return 'mr';
+    return /(?:^|\s)(?:मी|मला|माझ[ाीे]?|आहे|आहेत|आहेस|आहात|आणि|काय|कोण|कुठे|कधी|कस[ाीे]|किती|नाही|पण|तुम्ही)(?=\s|$|[.,?!\u0964])/.test(x)?'mr':'hi';
+  }
+  if(/^namaste\b/i.test(x))return 'hing';
+  if(/^(?:namaskar|namaskaar)\b/i.test(x))return 'mr';
+  var w=raw(x),hc=0,mc=0;
+  w.forEach(function(k){if(MR_R.has(k)&&!HI_R.has(k))mc++;else if(HI_R.has(k))hc++;});
+  if(mc>=1&&mc>=hc)return 'mr';
+  if(hc>=2||(hc===1&&w.length<=2))return 'hing';
+  return 'en';
+}
+var GREET=/^(?:hi|hello|hey|hola|namaste|namaskar|pranam|नमस्ते|नमस्कार|प्रणाम)[!. \u0964]*$/i;
+var HOWRU=/^(?:how are you|how r u|kaise ho|kaise hain|aap kaise hain|tum kaise ho|kese ho|kasa ahes|kase aahat|kasa aahes|तुम कैसे हो|आप कैसे हैं|कैसे हो|कैसे हैं|कसा आहेस|कसे आहात)\s*\??$/i;
+var GRP={happy:'pos',better:'pos',bored:'pos'};
+var LX={
+ hing:{hello:'Namaste',howru:'Main thik hoon, shukriya. Tum kaise ho?',ack:'Theek hai, samajh gaya.|Yeh mujhe pehle se pata hai.',unk:'Mujhe yeh abhi nahi pata. Jawab bata do, main yaad rakhunga.',pend:'Theek hai. Agar dobara poochoge "{q}" to main yahi bataunga.',nomem:'Is baare mein abhi yaad nahi hai:',clash:'Yaadon mein takraav hai:',again:'Main sun raha hoon. Main yahin hoon.',
+  sad:'Yeh sunke bura laga.|Kya hua? Mujhe batao.',happy:'Yeh toh bahut accha hai!|Aaj kya khaas hua?',angry:'Lagta hai tumhe gussa aa raha hai.|Kya hua? Batao.',tired:'Lagta hai aaj bahut thakaan hui.|Aaj itni thakaan kyun hui?',lonely:'Main yahin hoon, tumhare saath.|Kya hua jo akela mehsoos ho raha hai?',anxious:'Chinta mat karo, aaram se baat karte hain.|Sabse zyada kis baat ki fikar hai?',bored:'Bore ho rahe ho? Chalo kuch karte hain.|Tumhe kya karna pasand hai?',better:'Yeh sunke accha laga!|Aaj ka din kaisa chal raha hai?',
+  neg:'Yeh sach mein mushkil lagta hai.|Ek gehri saans lo. Kya kisi apne se baat kar sakte ho?|Batane ke liye shukriya. Main yahin hoon.',pos:'Sunke bahut accha laga.|Aur batao, kya chal raha hai?|Is khushi ko yaad rakhna. Shukriya batane ke liye.'},
+ hi:{hello:'नमस्ते',howru:'मैं ठीक हूँ, शुक्रिया। आप कैसे हैं?',ack:'ठीक है, समझ गया।|यह मुझे पहले से पता है।',unk:'मुझे यह अभी नहीं पता। जवाब बता दीजिए, मैं याद रखूँगा।',pend:'ठीक है। अगर आप फिर पूछेंगे "{q}" तो मैं यही बताऊँगा।',nomem:'इस बारे में अभी याद नहीं है:',clash:'यादों में टकराव है:',again:'मैं सुन रहा हूँ। मैं यहीं हूँ।',
+  sad:'यह सुनकर बुरा लगा।|क्या हुआ? मुझे बताइए।',happy:'यह तो बहुत अच्छी बात है!|आज क्या खास हुआ?',angry:'लगता है आपको गुस्सा आ रहा है।|क्या हुआ? बताइए।',tired:'लगता है आज बहुत थकान हुई।|आज इतनी थकान क्यों हुई?',lonely:'मैं यहीं हूँ, आपके साथ।|क्या हुआ जो अकेलापन महसूस हो रहा है?',anxious:'चिंता मत कीजिए, आराम से बात करते हैं।|सबसे ज़्यादा किस बात की फिक्र है?',bored:'बोर हो रहे हैं? चलिए कुछ करते हैं।|आपको क्या करना पसंद है?',better:'यह सुनकर अच्छा लगा!|आज का दिन कैसा चल रहा है?',
+  neg:'यह सच में मुश्किल लगता है।|एक गहरी साँस लीजिए। क्या आप किसी अपने से बात कर सकते हैं?|बताने के लिए शुक्रिया। मैं यहीं हूँ।',pos:'सुनकर बहुत अच्छा लगा।|और बताइए, क्या चल रहा है?|इस खुशी को याद रखिए। बताने के लिए शुक्रिया।'},
+ mr:{hello:'नमस्कार',howru:'मी ठीक आहे, धन्यवाद. तुम्ही कसे आहात?',ack:'ठीक आहे, समजलं.|हे मला आधीच माहीत आहे.',unk:'मला हे अजून माहीत नाही. उत्तर सांगा, मी लक्षात ठेवेन.',pend:'ठीक आहे. तुम्ही पुन्हा "{q}" विचारलंत तर मी हेच सांगेन.',nomem:'याबद्दल अजून लक्षात नाही:',clash:'आठवणींमध्ये विरोधाभास आहे:',again:'मी ऐकतोय. मी इथेच आहे.',
+  sad:'हे ऐकून वाईट वाटलं.|काय झालं? मला सांगा.',happy:'हे ऐकून खूप छान वाटलं!|आज काय विशेष झालं?',angry:'तुम्हाला राग आलाय असं वाटतंय.|काय झालं? सांगा.',tired:'आज खूप थकवा आलेला दिसतोय.|आज एवढा थकवा का आला?',lonely:'मी इथेच आहे, तुमच्यासोबत.|एकटं का वाटतंय?',anxious:'काळजी करू नका, शांतपणे बोलूया.|सर्वात जास्त कशाची काळजी वाटते?',bored:'कंटाळा आला का? चला काहीतरी करूया.|तुम्हाला काय करायला आवडतं?',better:'हे ऐकून बरं वाटलं!|आजचा दिवस कसा चाललाय?',
+  neg:'हे खरंच कठीण वाटतं.|एक दीर्घ श्वास घ्या. कोणाशी बोलू शकता का?|सांगितल्याबद्दल धन्यवाद. मी इथेच आहे.',pos:'ऐकून खूप छान वाटलं.|अजून सांगा, काय चाललंय?|हा आनंद लक्षात ठेवा. सांगितल्याबद्दल धन्यवाद.'}
+};
+function LL(){return LX[curLang]||null;}
+
 /* ---------- chat brain ---------- */
 function ackStatement(r,related){
+  var l=LL();if(l){var a=l.ack.split('|');return r.added===0?a[1]:a[0];}
   return r.added===0?'I already have that.':'Got it.';
 }
-function unknownReply(){return 'I do not know that yet. Reply with the answer and I will remember it.';}
+function unknownReply(){var l=LL();if(l)return l.unk;return 'I do not know that yet. Reply with the answer and I will remember it.';}
 function resolveAnswer(a){
   if(a.indexOf('@recall:')!==0)return a;
   var topic=a.slice(8),r=search(topic,15);
@@ -426,8 +523,8 @@ function resolveAnswer(a){
 }
 /* ---------- next-word prediction (tiny language model built from what it has learned) ---------- */
 var LM=null;
-function lmTokens(t){return t.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*|[.,!?;:]/gu)||[];}
-function lmJoin(w){return w.join(' ').replace(/\s+([.,!?;:])/g,'$1');}
+function lmTokens(t){return t.match(/[\p{L}\p{N}][\p{L}\p{M}\p{N}'’-]*|[.,!?;:\u0964]/gu)||[];}
+function lmJoin(w){return w.join(' ').replace(/\s+([.,!?;:\u0964])/g,'$1');}
 function buildLM(){
   if(LM&&LM.n===brain.sentences.length)return LM;
   var tri={},bi={};
@@ -470,25 +567,232 @@ function generate(prompt){
     var nx=lmPick(c,q,used,out.length,(seedToks[out.length]||'').toLowerCase());
     if(nx==='</s>')break;
     out.push(nx);var l=nx.toLowerCase();used[l]=(used[l]||0)+1;
-    if(/^[.!?]$/.test(nx)&&out.length>8)break;
+    if(/^[.!?\u0964]$/.test(nx)&&out.length>8)break;
   }
   var text=lmJoin(out);
-  return /[.!?]$/.test(text)?text:text+'.';
+  return /[.!?\u0964]$/.test(text)?text:text+(/[\u0900-\u097F]/.test(text)?'\u0964':'.');
+}
+/* ---------- feelings: kind replies, typo tolerance and a short memory of the conversation ---------- */
+var MOOD_MS=15*60*1000;
+var FEEL_WORDS={
+  sad:'दुखी दुःखी उदास दुख dukhi dukh udas udaas dukhi vait वाईट sad unhappy upset crying cry heartbroken miserable gloomy depressed sadness udaas dukhi',
+  happy:'खुश खुशी मस्त आनंदी anandi mast khushi happy glad excited joyful cheerful great awesome wonderful amazing delighted thrilled khush',
+  angry:'गुस्सा नाराज राग गुस्से naraz angry mad furious annoyed irritated frustrated gussa',
+  tired:'थका थकी थकान थकलो थकले थकवा thakan thaklo thakle tired exhausted sleepy drained fatigued weary thaka thak',
+  lonely:'अकेला अकेली अकेलापन एकटा एकटी akeli lonely alone isolated ignored akela',
+  anxious:'चिंता चिंतित परेशान घबराहट डर काळजी चिंतित chinta pareshan ghabrahat kalji anxious worried worry nervous scared afraid stressed stress panicking panic overwhelmed frightened',
+  bored:'bored boredom bore ऊब कंटाळा kantala'
+};
+var FEEL_MAP={},FEEL_KEYS=[];
+Object.keys(FEEL_WORDS).forEach(function(f){FEEL_WORDS[f].split(' ').forEach(function(w){FEEL_MAP[w]=f;FEEL_KEYS.push(w);});});
+var EXACT_ONLY=new Set('sad mad cry glad great thaka thak gussa akela khush udaas dukhi'.split(' '));
+var PROTECT=new Set('tried tire tires tied tide hired fired wired lovely only along scare scares scarred sand said made mind greet greed sleep sleeps ignore ignores annoy'.split(' '));
+var HNEG=new Set('nahi nahin nhi naahi नहीं नाही न'.split(' '));
+var NEG=new Set("not no never dont don't isnt isn't aint cant can't wasnt wasn't didnt didn't".split(' '));
+var FIRSTP=new Set("main mai mujhe mera meri mi mala majha maza hoon hun hu aahe ahe मैं मै मुझे मेरा मेरी मी मला माझा माझी हूँ हूं आहे i im i'm iam ima me feel feeling feels felt".split(' '));
+var THIRD=new Set("he she they his her their friend friends brother sister mother mom dad father people everyone".split(' '));
+var CUE=new Set("i im i'm iam ima me my feel feeling feels felt so very really too still kinda quite extremely super".split(' '));
+var PHRASES=[
+  [/(?:thik|theek|tik|accha|achha|acha|badhiya)\s*(?:nahi|nahin|nhi)|ठीक\s*(?:नहीं|नाही)|अच्छा\s*नहीं|बरं\s*नाही|बरे\s*नाही/i,'sad'],
+  [/(?:^|\s)(?:thik|theek|tik|accha|achha|badhiya|mast)\s*(?:hoon|hun|hu|hai)|ठीक\s*(?:हूँ|हूं|हु|है)|अच्छा\s*(?:हूँ|हूं|है)|बढ़िया|ठीक\s*आहे|मजेत\s*आहे|छान\s*आहे/i,'better'],
+  [/\b(?:feel(?:ing)?|am|im|i'm)\s+(?:so\s+)?(?:low|empty|down|blue|numb)\b/i,'sad'],
+  [/\bnot\s+(?:ok|okay|good|fine|well)\b/i,'sad'],
+  [/\b(?:no one|nobody)\s+(?:cares|likes me|loves me|talks to me)\b/i,'lonely'],
+  [/\b(?:no friends|have no one)\b/i,'lonely'],
+  [/\bcan'?t\s+sleep\b/i,'anxious'],
+  [/\bfed up\b/i,'angry'],
+  [/\bworn out\b/i,'tired']
+];
+var HEAVY=['That sounds like a lot.','I can tell this is heavy.'];
+var AGAIN=['I hear you. I am staying right here with you.','I know it is still there. I am not going anywhere.','That is okay. Take your time. I am here.'];
+var NOREPLY=['That is okay. You do not have to share anything. I am here if you change your mind, or we can talk about something else.','No problem at all. We can talk about something else, or just stay quiet for a bit.'];
+var FEEL={
+  sad:{
+    line:['I am sorry you feel this way.','I am sorry you are feeling sad.','That sounds hard, and I am glad you told me.'],
+    ask:[['Why do you feel sad?','open'],['What happened today?','open'],['Do you want to tell me about it?','yn']],
+    comfort:['That sounds painful.','Feeling like that is really hard.','It is okay to feel sad about that.'],
+    help:['What would help you feel a little better?','Is there someone you could talk to about it?'],
+    close:['I am glad you shared that with me. I am here whenever you want to talk.','Thank you for telling me. Be gentle with yourself today.']
+  },
+  happy:{
+    line:['That is great to hear!','I am happy for you!','Wonderful!'],
+    ask:[['What made your day good?','open'],['What happened?','open'],['Tell me, what is the good news?','open']],
+    comfort:['That sounds really nice.','I love that for you.','That is a lovely thing to happen.'],
+    help:['Who would you like to share this with?','What was the best part?'],
+    close:['Hold on to that feeling. Thank you for telling me.','I am glad you shared this with me.']
+  },
+  angry:{
+    line:['I can hear that you are upset.','That sounds frustrating.','I am sorry something made you this angry.'],
+    ask:[['What happened?','open'],['What made you angry?','open'],['Do you want to tell me what went wrong?','yn']],
+    comfort:['That does sound really annoying.','Feeling angry about that is understandable.'],
+    help:['Would a few slow breaths help right now?','What do you need most right now?'],
+    close:['Thank you for telling me instead of holding it in. I am here if you want to talk more.','I hope it feels a little lighter now.']
+  },
+  tired:{
+    line:['You sound worn out.','I am sorry you are so tired.','That sounds exhausting.'],
+    ask:[['What made you so tired today?','open'],['Did you sleep well last night?','open'],['Have you had a break today?','yn']],
+    comfort:['Your body might be asking for rest.','That is a lot to carry in one day.'],
+    help:['Can you take a short break or drink some water right now?','What is one thing you can leave for tomorrow?'],
+    close:['Please rest when you can. I am here whenever you want to talk.','Take care of yourself today.']
+  },
+  lonely:{
+    line:['I am sorry you feel lonely. I am here with you.','Feeling alone is hard, and I am glad you told me.','I am here, and I am listening.'],
+    ask:[['What happened that made you feel alone?','open'],['How long have you felt this way?','open'],['Do you want to talk about it?','yn']],
+    comfort:['Wanting connection is very human.','That sounds really lonely.'],
+    help:['Is there one person you could message today, even just to say hi?','What usually helps you feel closer to people?'],
+    close:['I am glad you told me. I am a small program, so please also reach out to someone close to you.','Thank you for sharing that. You matter, and I am here to talk.']
+  },
+  anxious:{
+    line:['That sounds stressful. Let us go slowly.','I am sorry you feel so worried.','It is hard to feel on edge like that.'],
+    ask:[['What is worrying you the most?','open'],['What is on your mind?','open'],['Do you want to tell me what is making you nervous?','yn']],
+    comfort:['That is a lot to think about.','It is hard when your mind will not slow down.'],
+    help:['Would you like to try one slow breath: in for 4, out for 6?','What is one small step you could take about it?'],
+    close:['One step at a time is enough. I am here if you want to talk more.','Thank you for telling me. I hope your mind can settle a little.']
+  },
+  bored:{
+    line:['Bored? Let us fix that.','Ah, a slow moment.','I hear you.'],
+    ask:[['What do you usually enjoy doing?','open'],['Do you want to learn something new together?','yn'],['Want to teach me something? I learn from lessons.','yn']],
+    comfort:['Boredom can mean you want something new.','That happens to everyone.'],
+    help:['Want to teach me a new fact in the Teach screen?','What is something you have always wanted to try?'],
+    close:['Sounds like a plan. I am here whenever you want to chat.','Let me know what you pick.']
+  },
+  better:{
+    line:['I am glad you are not feeling that way.','That is good to hear.'],
+    ask:[['How is your day going?','open'],['What is going well?','open']],
+    comfort:['That is good.','I am glad.'],
+    help:['What would make the rest of your day nice?','Is there anything you want to talk about?'],
+    close:['I am glad we talked. I am here whenever you want.','Thank you for sharing.']
+  }
+};
+
+function osa(a,b){
+  var n=a.length,m=b.length,d=[],i,j;
+  for(i=0;i<=n;i++)d[i]=[i];
+  for(j=1;j<=m;j++)d[0][j]=j;
+  for(i=1;i<=n;i++)for(j=1;j<=m;j++){
+    d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
+    if(i>1&&j>1&&a[i-1]===b[j-2]&&a[i-2]===b[j-1])d[i][j]=Math.min(d[i][j],d[i-2][j-2]+1);
+  }
+  return d[n][m];
+}
+/* one word to a feeling, forgiving about spelling mistakes and stretched letters (sadd, tireddd, hapy) */
+function feelWord(word){
+  var w=word.toLowerCase().replace(/['’]/g,'');
+  if(!w||PROTECT.has(w))return null;
+  var cands=[w,w.replace(/(.)\1+/g,'$1'),w.replace(/(.)\1{2,}/g,'$1$1')];
+  var i,k;
+  for(i=0;i<cands.length;i++)if(FEEL_MAP[cands[i]])return FEEL_MAP[cands[i]];
+  for(i=0;i<cands.length;i++){
+    var x=cands[i];
+    if(x.length<4||PROTECT.has(x))continue;
+    var th=x.length<=5?1:2;
+    for(k=0;k<FEEL_KEYS.length;k++){
+      var key=FEEL_KEYS[k];
+      if(key.length<4||EXACT_ONLY.has(key)||key.charAt(0)!==x.charAt(0)||Math.abs(key.length-x.length)>th)continue;
+      if(osa(x,key)<=th)return FEEL_MAP[key];
+    }
+  }
+  return null;
+}
+function feelDetect(t){
+  if(/^(?:when|if|whenever)\s+i\s+(?:say|type|write|ask)\b/i.test(t)||/^skill\s*:/i.test(t))return null;
+  var toks=(t.toLowerCase().match(/[\p{L}\p{M}\p{N}'’]+/gu)||[]).map(function(w){return w.replace(/’/g,"'");});
+  if(!toks.length||toks.length>40)return null;
+  var firstP=toks.some(function(w){return FIRSTP.has(w);});
+  if(!firstP&&toks.some(function(w){return THIRD.has(w);}))return null;
+  if(/\b(?:means?|meaning|defined as|synonyms?)\b/i.test(t))return null;
+  if(isQ(t)&&!firstP)return null;
+  var cue=firstP||toks.length<=4||toks.some(function(w){return CUE.has(w);});
+  if(!cue)return null;
+  var found=null,i,j;
+  for(i=0;i<toks.length&&!found;i++){
+    var f=feelWord(toks[i]);
+    if(!f)continue;
+    var neg=false;
+    for(j=Math.max(0,i-2);j<i;j++)if(NEG.has(toks[j]))neg=true;
+    for(j=i+1;j<=i+2&&j<toks.length;j++)if(HNEG.has(toks[j]))neg=true;
+    found={feel:f,neg:neg};
+  }
+  if(!found){for(i=0;i<PHRASES.length;i++)if(PHRASES[i][0].test(t)){found={feel:PHRASES[i][1],neg:false};break;}}
+  if(!found)return null;
+  if(found.neg)found.feel=found.feel==='happy'?'sad':'better';
+  found.intense=/\b(?:so+|very+|verr*y+|really|extremely|too|super)\b/i.test(t);
+  return found;
+}
+function isYes(t){var w=raw(t)[0]||'';return /^(?:yes|yeah|yep|yup|ya|haan|han|ok|okay|sure|y)$/.test(w)||(w.length>=3&&(osa(w,'yes')<=1||osa(w,'yeah')<=1)&&w!=='yet');}
+function isNo(t){var w=raw(t)[0]||'';return /^(?:no|nope|nah|nahi|n)$/.test(w)||(w.length>=4&&osa(w,'nope')<=1)||/^not now\b/i.test(t.trim());}
+/* turn "my exam went badly" into "your exam went badly" so it can echo what you said */
+function reflect(t){
+  var s=t.replace(/[.!?]+$/,'').trim().replace(/^(?:because|cuz|coz|bcoz|bc|since|its because|it's because|it is because|well|um|uh|so)\s+/i,'');
+  var n=s.split(/\s+/).length;
+  if(n<3||n>12)return '';
+  s=' '+s.toLowerCase()+' ';
+  [[/\bi'm\b|\bim\b|\bi am\b/g,'you are'],[/\bi've\b/g,'you have'],[/\bi'll\b/g,'you will'],[/\bi'd\b/g,'you would'],
+   [/\bi\b/g,'you'],[/\bmyself\b/g,'yourself'],[/\bmy\b/g,'your'],[/\bmine\b/g,'yours'],[/\bme\b/g,'you'],
+   [/\bam\b/g,'are'],[/\byou was\b/g,'you were']].forEach(function(p){s=s.replace(p[0],p[1]);});
+  return 'It sounds like '+s.trim()+'. ';
+}
+function withName(line){
+  return brain.user&&Math.random()<0.5?line.replace(/([.!])$/,', '+brain.user+'$1'):line;
+}
+function startMood(d,t){
+  if(LL()&&LL()[d.feel]){var p=LL()[d.feel].split('|');brain.mood={feel:d.feel,stage:1,ask:'open',at:Date.now(),n:1,hist:[t],lang:curLang};return p[0]+' '+p[1];}
+  var F=FEEL[d.feel],ask=pick(F.ask),line=pick(F.line);
+  if(d.intense&&/^(?:sad|angry|tired|lonely|anxious)$/.test(d.feel))line=pick(HEAVY)+' '+line;
+  brain.mood={feel:d.feel,stage:1,ask:ask[1],at:Date.now(),n:1,hist:[t]};
+  return withName(line)+' '+ask[0];
+}
+/* returns a reply when the message is about a feeling or answers a feeling question, otherwise null */
+function feelRespond(t){
+  var now=Date.now(),mo=brain.mood;
+  if(mo&&now-mo.at>MOOD_MS)mo=brain.mood=null;
+  if(GREET.test(t))return null;
+  var d=feelDetect(t);
+  if(mo){
+    if(/^(?:thanks|thank you|thx|ty|thank u)\b/i.test(t)){brain.mood=null;return 'You are welcome. I am here whenever you want to talk.';}
+    if(d&&d.feel!==mo.feel)return startMood(d,t);
+    if(d&&d.feel===mo.feel&&raw(t).length<=3&&mo.feel!=='happy'&&mo.feel!=='better'){
+      mo.n++;mo.at=now;mo.hist.push(t);
+      return LL()?LL().again:pick(AGAIN);
+    }
+    if(isQ(t)&&!/\b(?:i|im|i'm|iam|me|my)\b/i.test(t))return null;
+    mo.hist.push(t);if(mo.hist.length>3)mo.hist.shift();mo.at=now;
+    var F=FEEL[mo.feel];
+    if(LL()){var g=LL()[GRP[mo.feel]||'neg'].split('|');if(mo.stage===1){mo.stage=2;return g[0]+' '+g[1];}brain.mood=null;return g[2];}
+    if(mo.stage===1){
+      if(mo.ask==='yn'){
+        if(isYes(t)){mo.ask='open';return pick(['Okay, I am listening. Take your time.','Go ahead. I am listening.']);}
+        if(isNo(t)){brain.mood=null;return pick(NOREPLY);}
+      }
+      mo.stage=2;mo.ask='open';
+      return reflect(t)+pick(F.comfort)+' '+pick(F.help);
+    }
+    brain.mood=null;
+    return pick(['That sounds like a good idea.','I think that could really help.','Thank you for telling me that.'])+' '+pick(F.close);
+  }
+  if(d)return startMood(d,t);
+  return null;
 }
 function respond(text){
   var t=text.trim(),m;
-  if(brain.pending&&!isQ(t)&&!/^(hi|hello|hey|hola|namaste)\b/i.test(t)){
+  var dl=detectLang(t);curLang=dl!=='en'?dl:(brain.mood&&brain.mood.lang)||'en';
+  if(brain.pending&&feelDetect(t))brain.pending=null;
+  if(brain.pending&&!isQ(t)&&!GREET.test(t)){
     var q=brain.pending;brain.pending=null;
     addQA(q,t);
+    if(LL())return LL().pend.replace('{q}',q);
     return 'Okay. If you ask "'+q+'" again, I will answer with that. If it was not an answer, remove the pair in the Brain section.';
   }
   brain.pending=null;
   var taught=qaMatch(t);
   if(taught)return resolveAnswer(taught.a);
-  if(/^(hi|hello|hey|hola|namaste)\b[!. ]*$/i.test(t)){
+  var fr=feelRespond(t);
+  if(fr)return fr;
+  if(GREET.test(t)){
     var who=brain.user?', '+brain.user:'';
-    return 'Hello'+who+'!';
+    return (LL()?LL().hello:'Hello')+who+'!';
   }
+  if(HOWRU.test(t))return LL()?LL().howru:'I am doing well, thank you. How are you?';
   if(/^(what(?:'s| is) your name|who are you|what are you called)\s*\??$/i.test(t))
     return brain.name?'I am '+brain.name+'.':'I do not have a name yet. Tell me: your name is …';
   if(/^how old are you\s*\??$/i.test(t))return ago(brain.born)==='just now'?'I was just born.':'I am '+ago(brain.born)+'.';
@@ -497,6 +801,8 @@ function respond(text){
   if(isQ(t)){
     var qa=qaMatch(t);
     if(qa)return resolveAnswer(qa.a);
+    var th=think(t);
+    if(th)return th;
     var gen=generate(t);
     if(gen)return gen;
     brain.pending=t;
@@ -591,10 +897,62 @@ function execOne(g,inSkill){
     if(gtxt)return {steps:[],out:gtxt};
     return {steps:[S('think','No tool matches, so I checked memory.'),S('tool','memory.search -> '+f.hits.length+' hits')],out:f.hits.map(function(x){return '- '+x.s.t;}).join('\n')};
   }
-  if(/^(hi|hello|hey|hola|namaste)\b[!. ]*$/i.test(l)||/^(what(?:'s| is) your name|who are you|how old are you)\s*\??$/i.test(l)){
+  if(GREET.test(l)||/^(what(?:'s| is) your name|who are you|how old are you)\s*\??$/i.test(l)){
     return {steps:[S('think','This is small talk.'),S('tool','chat.reply')],out:respond(l)};
   }
   return {steps:[S('think','No tool, skill or memory matches this.')],out:'I do not know how to do that yet. Teach me a skill from the + menu, or tell me about it in Chat first.'};
+}
+
+/* ---------- system constitution (always applied) ---------- */
+var CONSTITUTION='SYSTEM CONSTITUTION. Always follow these rules:\n1. Never use conversational filler such as "um", "uh", "er" or "hmm".\n2. Lead with the most important fact in the first sentence.\n3. Organise complex information with bullet points and bold text.\n4. Be concise, direct and professional.\n5. Answer only from stored memory. If memory has nothing relevant, say so plainly.';
+window.MiidoConstitution=CONSTITUTION;
+function polish(t){return String(t).replace(/(^|[\s(])(?:um+|uh+|er+|erm|hmm+)\b[,.\u2026]*\s*/gi,'$1').replace(/[ \t]{2,}/g,' ').trim();}
+/* **bold** markers in bot replies become real bold text */
+function fmt(t){
+  var out=[],re=/\*\*(.+?)\*\*/g,last=0,m;
+  while((m=re.exec(t))){if(m.index>last)out.push(t.slice(last,m.index));out.push(h('b',null,m[1]));last=re.lastIndex;}
+  if(last<t.length)out.push(t.slice(last));
+  return out;
+}
+/* ---------- silent chain-of-thought loop ----------
+   1 intent  2 break the question into parts  3 retrieve per part (BM25)
+   4 contradiction check  5 compose: key fact first, support as bullets.
+   Nothing is shown while it runs; the trail is kept in window.lastThought. */
+var NEGW=new Set("nahi nahin nhi नहीं नाही mat not no never none cannot cant can't isnt isn't dont don't doesnt doesn't wont won't".split(' '));
+function isRule(t){return /^(when|if|whenever)\s+i\s+(say|type|write|ask)\b/i.test(t);}
+function negs(t){return raw(t).filter(function(w){return NEGW.has(w);}).length;}
+function splitParts(q){
+  var parts=q.replace(/\?+/g,'?|').split(/\||\s*;\s*|\s+and also\s+|\s+and then\s+/i).map(function(x){return x.trim();}).filter(function(x){return content(x).length;});
+  if(parts.length<2){var m=q.match(/^(.+?)\s+(?:and|aur|और|आणि|ani)\s+(.+)$/i);if(m&&(/^(?:what|who|where|when|why|how|which)\b/i.test(m[2])||raw(m[2]).some(function(w){return QWH.has(w);})))parts=[m[1],m[2]];}
+  return parts.length?parts:[q];
+}
+function clash(hits){
+  for(var i=0;i<hits.length;i++)for(var j=i+1;j<hits.length;j++){
+    var A=new Set(content(hits[i].s.t)),B=new Set(content(hits[j].s.t)),sh=0;
+    B.forEach(function(w){if(A.has(w))sh++;});
+    if(sh>=2&&sh/Math.min(A.size,B.size)>=0.6&&(negs(hits[i].s.t)%2)!==(negs(hits[j].s.t)%2))return [hits[i].s.t,hits[j].s.t];
+  }
+  return null;
+}
+function think(q){
+  var trace=['intent: question'],parts=splitParts(q),blocks=[],seen=new Set(),found=0;
+  trace.push('parts: '+parts.length);
+  parts.forEach(function(p){
+    var good=search(p,6).hits.filter(function(x){return x.cov>=0.4&&!isRule(x.s.t)&&!seen.has(x.s.t);});
+    trace.push('retrieve "'+p+'": '+good.length+' hits');
+    if(!good.length){blocks.push((LL()?LL().nomem:'No memory yet for:')+' '+p.replace(/\?+$/,''));return;}
+    found++;
+    var lead=good[0],sup=good.slice(1,4).filter(function(x){return x.cov>=0.5;});
+    var b=(parts.length>1?'\u25B8 '+p.replace(/\?+$/,'')+'\n':'')+'**'+lead.s.t+'**';
+    seen.add(lead.s.t);
+    sup.forEach(function(x){seen.add(x.s.t);b+='\n\u2022 '+x.s.t;});
+    var c=clash([lead].concat(sup));
+    trace.push('contradiction check: '+(c?'conflict':'clear'));
+    if(c)b+='\n\u2022 '+(LL()?LL().clash:'Memory conflict:')+' "'+c[0]+'" versus "'+c[1]+'"';
+    blocks.push(b);
+  });
+  window.lastThought=trace;
+  return found?blocks.join('\n\n'):null;
 }
 
 /* ---------- feed ---------- */
@@ -604,7 +962,7 @@ function renderRun(run){
     run.steps.map(function(s){return h('div',{class:'step '+s.k},h('span',{class:'k'},s.k),h('span',{class:'t'},s.t));}),
     run.out!=null?h('div',{class:'out'},run.out):null);
 }
-function msgNode(m){var n=m.r==='run'?renderRun(m.run):h('div',{class:'msg '+m.r},m.t);n._m=m;return n;}
+function msgNode(m){var n=m.r==='run'?renderRun(m.run):h('div',{class:'msg '+m.r},m.r==='bot'?fmt(m.t):m.t);n._m=m;return n;}
 function toBottom(){var f=$('#feed');f.scrollTop=f.scrollHeight;}
 function renderFeed(){
   var f=$('#feed');f.textContent='';
@@ -646,7 +1004,7 @@ async function submit(){
 async function chatSend(text){
   addMsg('me',text);
   await sleep(350+Math.random()*350);
-  var reply=respond(text);
+  var reply=polish(respond(text));
   addMsg('bot',reply);
   save();renderHeader();renderBrain();
 }
@@ -744,7 +1102,7 @@ function renderBrain(){
     ql.appendChild(h('li',null,h('span',{class:'txt'},h('b',null,p.q),h('br'),p.a),
       h('button',{class:'x',type:'button','aria-label':'Forget this pair',onclick:function(){brain.qa.splice(i,1);save();renderBrain();renderHeader();}},'×')));
   });
-  var ex=Object.assign({},brain,{chat:[],runs:[],archive:[],lessons:[],viewFrom:0,pending:null});
+  var ex=Object.assign({},brain,{chat:[],runs:[],archive:[],lessons:[],viewFrom:0,pending:null,mood:null});
   var ta=$('#export');
   if(ta.hasAttribute('readonly'))ta.value=JSON.stringify(ex);
 }
@@ -770,7 +1128,7 @@ var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 $('#mic').addEventListener('click',function(){
   if(!SR){micBlocked();return;}
   try{
-    var rec=new SR();rec.lang=(navigator&&navigator.language)||'en-US';
+    var rec=new SR();rec.lang=brain.micLang||(navigator&&navigator.language)||'en-US';
     rec.onresult=function(e){var t=e.results[0][0].transcript;var s=$('#say');s.value+=(s.value?' ':'')+t;autoGrow();updateGo();};
     rec.onerror=function(){micBlocked();};
     rec.start();
@@ -897,6 +1255,7 @@ function lesson(text){
   text=text.trim();
   if(!text)return;
   addLesson('me',text);
+  curLang=detectLang(text);
   addLesson('bot',teachParse(text));
   save();renderHeader();renderBrain();renderLists();
 }
@@ -916,7 +1275,7 @@ function toggleListen(){
   var got='',failed=false;
   try{
     tRec=new SRc();
-    tRec.lang=(navigator&&navigator.language)||'en-US';
+    tRec.lang=brain.micLang||(navigator&&navigator.language)||'en-US';
     tRec.interimResults=true;tRec.continuous=false;
     tRec.onstart=function(){listening=true;$('#tmic').classList.add('live');setStatus('Listening. Tap the mic to stop.');};
     tRec.onresult=function(e){var t='';for(var i=0;i<e.results.length;i++)t+=e.results[i][0].transcript;got=t;setStatus(t);};
@@ -1105,7 +1464,7 @@ function migrateArchive(){
 function newChat(){
   if(busy)return;
   archiveCurrent();
-  brain.chat=[];brain.viewFrom=0;brain.pending=null;
+  brain.chat=[];brain.viewFrom=0;brain.pending=null;brain.mood=null;
   setMode('agent');renderFeed();save();
   hideChats();$('#say').focus();
 }
@@ -1115,7 +1474,7 @@ function openSaved(id){
   if(i<0)return;
   var entry=brain.archive.splice(i,1)[0];
   archiveCurrent();
-  brain.chat=entry.chat;brain.viewFrom=0;brain.pending=null;
+  brain.chat=entry.chat;brain.viewFrom=0;brain.pending=null;brain.mood=null;
   renderFeed();save();hideChats();
 }
 function renderChatsList(){
@@ -1141,6 +1500,7 @@ migrateArchive();
 /* ---------- boot ---------- */
 if(!brain.name){brain.name='Miido';save();}
 $('#name').value=brain.name||'';
+$('#miclang').value=brain.micLang||'';$('#miclang').addEventListener('change',function(){brain.micLang=this.value;save();});
 setMode('chat');updateGo();
 renderHeader();renderFeed();renderLists();renderBrain();
 })();
@@ -1170,7 +1530,7 @@ renderHeader();renderFeed();renderLists();renderBrain();
 
   /* ---- retrieval (small TF-IDF style scorer, no libraries) ---- */
   var STOP = new Set('a an the is are was were am be to of and or in on at for with it this that i you he she we they me my your do does did what who where when why how can will would should as by from if then so not no yes say tell have has'.split(' '));
-  function toks(t) { return (String(t).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).filter(function (w) { return !STOP.has(w); }); }
+  function toks(t) { return (String(t).toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) || []).filter(function (w) { return !STOP.has(w); }); }
   function getRules(query) {
     var rules = read();
     if (rules.length <= CFG.maxAll) return rules.map(function (r) { return r.text; });
@@ -1185,7 +1545,8 @@ renderHeader();renderFeed();renderLists();renderBrain();
   }
   function memoryBlock(query) {
     var r = getRules(query);
-    return r.length ? CFG.header + '\n' + r.map(function (x) { return '- ' + x; }).join('\n') : '';
+    var c = window.MiidoConstitution || '';
+    return c + (r.length ? (c ? '\n\n' : '') + CFG.header + '\n' + r.map(function (x) { return '- ' + x; }).join('\n') : '');
   }
 
   /* ---- 1. watch the Teach screen (typed, voice and auto-submitted lessons) ---- */
