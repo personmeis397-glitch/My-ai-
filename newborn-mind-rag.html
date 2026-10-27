@@ -424,6 +424,57 @@ function resolveAnswer(a){
   var good=r.hits.filter(function(x){return x.cov>=0.4&&!/^(when|if|whenever)\s+i\s+(say|type|write|ask)/i.test(x.s.t);});
   return good.length?good.map(function(x){return x.s.t;}).join('\n'):'I have not learned anything about '+topic+' yet.';
 }
+/* ---------- next-word prediction (tiny language model built from what it has learned) ---------- */
+var LM=null;
+function lmTokens(t){return t.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*|[.,!?;:]/gu)||[];}
+function lmJoin(w){return w.join(' ').replace(/\s+([.,!?;:])/g,'$1');}
+function buildLM(){
+  if(LM&&LM.n===brain.sentences.length)return LM;
+  var tri={},bi={};
+  function add(map,k,tok){var o=map[k]||(map[k]={});o[tok]=(o[tok]||0)+1;}
+  brain.sentences.forEach(function(s){
+    if(/^(when|if|whenever)\s+i\s+(say|type|write|ask)\b/i.test(s.t)||s.t.indexOf('@recall:')===0)return;
+    var w=['<s>','<s>'].concat(lmTokens(s.t),['</s>']);
+    for(var i=2;i<w.length;i++){
+      var a=w[i-2].toLowerCase(),b=w[i-1].toLowerCase();
+      add(tri,a+'\u0001'+b,w[i]);add(bi,b,w[i]);
+    }
+  });
+  LM={n:brain.sentences.length,tri:tri,bi:bi};
+  return LM;
+}
+function lmPick(cands,q,used,len,want){
+  var keys=Object.keys(cands),tot=0,ws=keys.map(function(k){
+    var w=cands[k],lk=k.toLowerCase();
+    if(q.has(stem(lk)))w*=3;
+    if(want&&lk===want)w*=10;
+    if(used[lk])w*=Math.pow(0.15,used[lk]);
+    if(k==='</s>'&&len<6)w*=0.2;
+    w=Math.pow(w,1/0.6);tot+=w;return w;
+  });
+  var r=Math.random()*tot;
+  for(var i=0;i<keys.length;i++){r-=ws[i];if(r<=0)return keys[i];}
+  return keys[keys.length-1];
+}
+function generate(prompt){
+  var lm=buildLM(),q=new Set(content(prompt));
+  var hits=search(prompt,5).hits.filter(function(x){return x.cov>=0.4&&!/^(when|if|whenever)\s+i\s+(say|type|write|ask)\b/i.test(x.s.t);});
+  if(!hits.length)return null;
+  var best=hits.filter(function(x){return x.cov>=0.9*hits[0].cov;}),seed=best[Math.floor(Math.random()*best.length)];
+  var seedToks=lmTokens(seed.s.t),out=seedToks.slice(0,2),used={};
+  out.forEach(function(w){var l=w.toLowerCase();used[l]=(used[l]||0)+1;});
+  for(var n=0;n<45;n++){
+    var a=(out[out.length-2]||'<s>').toLowerCase(),b=(out[out.length-1]||'<s>').toLowerCase();
+    var c=lm.tri[a+'\u0001'+b]||lm.bi[b];
+    if(!c)break;
+    var nx=lmPick(c,q,used,out.length,(seedToks[out.length]||'').toLowerCase());
+    if(nx==='</s>')break;
+    out.push(nx);var l=nx.toLowerCase();used[l]=(used[l]||0)+1;
+    if(/^[.!?]$/.test(nx)&&out.length>8)break;
+  }
+  var text=lmJoin(out);
+  return /[.!?]$/.test(text)?text:text+'.';
+}
 function respond(text){
   var t=text.trim(),m;
   if(brain.pending&&!isQ(t)&&!/^(hi|hello|hey|hola|namaste)\b/i.test(t)){
@@ -446,12 +497,8 @@ function respond(text){
   if(isQ(t)){
     var qa=qaMatch(t);
     if(qa)return resolveAnswer(qa.a);
-    var r=search(t,3);
-    if(r.hits.length&&r.hits[0].cov>=0.45){
-      var top=r.hits[0],parts=[top.s.t];
-      if(r.hits[1]&&r.hits[1].sc>=0.8*top.sc&&r.hits[1].s.t!==top.s.t)parts.push(r.hits[1].s.t);
-      return parts.join(' ');
-    }
+    var gen=generate(t);
+    if(gen)return gen;
     brain.pending=t;
     return unknownReply();
   }
@@ -540,6 +587,8 @@ function execOne(g,inSkill){
   }
   var f=search(l,3);
   if(f.hits.length&&f.hits[0].cov>=0.55){
+    var gtxt=generate(l);
+    if(gtxt)return {steps:[],out:gtxt};
     return {steps:[S('think','No tool matches, so I checked memory.'),S('tool','memory.search -> '+f.hits.length+' hits')],out:f.hits.map(function(x){return '- '+x.s.t;}).join('\n')};
   }
   if(/^(hi|hello|hey|hola|namaste)\b[!. ]*$/i.test(l)||/^(what(?:'s| is) your name|who are you|how old are you)\s*\??$/i.test(l)){
@@ -792,15 +841,17 @@ $('#reset').addEventListener('click',function(){
 /* ---------- teaching screen ---------- */
 var tRec=null,listening=false,armed=false,autoTimer=null;
 function renderLessons(){
+  closeAct();
   var f=$('#lessons');f.textContent='';
   if(!brain.lessons.length){
     f.appendChild(h('div',{class:'tempty'},
       h('p',{class:'tbig'},'Teach it something'),
       h('p',null,'Speak with the mic, type, or share a file with the + button.'),
-      h('p',{class:'ex'},'Question and answer: say the question, then the answer.',h('br'),'Skill: skill: brief me on => find $input; summarize $input')));
+      h('p',{class:'ex'},'Question and answer: say the question, then the answer.',h('br'),'Skill: skill: brief me on => find $input; summarize $input'),
+      h('p',null,'Taught something wrong? Double tap it to delete it.')));
     return;
   }
-  brain.lessons.forEach(function(m){f.appendChild(h('div',{class:'msg '+m.r},m.t));});
+  brain.lessons.forEach(function(m){var n=h('div',{class:'msg '+m.r},m.t);n._l=m;f.appendChild(n);});
   f.scrollTop=f.scrollHeight;
 }
 function addLesson(r,t){
@@ -808,30 +859,36 @@ function addLesson(r,t){
   if(brain.lessons.length>100)brain.lessons=brain.lessons.slice(-100);
   renderLessons();
 }
-function teachParse(t){
+/* Works out what a lesson teaches, with no side effects. Used to learn it and to forget it again. */
+function teachClassify(t){
   var m;
-  if((m=t.match(/^skill\s*:\s*(.+?)\s*=>\s*(.+)$/i))){
-    var trig=m[1].trim().toLowerCase(),steps=m[2].split(/\s*;\s*/).filter(Boolean);
-    if(!trig||!steps.length)return 'A skill needs a trigger phrase and at least one step.';
-    brain.skills=brain.skills.filter(function(x){return x.trigger!==trig;});
-    brain.skills.push({trigger:trig,steps:steps});
-    return 'Learned the skill "'+trig+'" with '+steps.length+(steps.length===1?' step':' steps')+'. Use it in Agent mode.';
-  }
+  if((m=t.match(/^skill\s*:\s*(.+?)\s*=>\s*(.+)$/i)))
+    return {type:'skill',trig:m[1].trim().toLowerCase(),steps:m[2].split(/\s*;\s*/).filter(Boolean)};
   var rule=null;
   if((m=t.match(/^(?:when|if|whenever)\s+i\s+(?:say|type|write|ask)\s+["']?(.+?)["']?\s*,?\s*(?:then\s+)?(?:you\s+)?(?:have to\s+|must\s+|should\s+|will\s+)?(?:say|tell|reply|answer|respond(?: with)?|give)(?: me)?\s+["']?(.+?)["']?\s*$/i)))rule=[m[1],m[2]];
   else if((m=t.match(/^(?:you\s+)?(?:have to\s+|must\s+|should\s+)?(?:say|tell|reply|answer|respond(?: with)?|give)(?: me)?\s+["']?(.+?)["']?\s+(?:when|if|whenever)\s+i\s+(?:say|type|write|ask)\s+["']?(.+?)["']?\s*$/i)))rule=[m[2],m[1]];
   if(rule){
     var rq=rule[0].replace(/[.!,]+$/,'').trim(),ra=rule[1].replace(/[.!,]+$/,'').trim(),rm;
-    if((rm=ra.match(/^(?:all|everything)(?: the)?(?: information| info)?(?: that)?(?: i)?(?: shared| told| gave)?(?: with you| to you)?\s*(?:about|on)\s+(.+)$/i))){
-      addQA(rq,'@recall:'+rm[1].trim());
-      return 'Learned. When you say "'+rq+'" I will tell you everything I know about '+rm[1].trim()+'.';
-    }
-    addQA(rq,ra);
-    return 'Learned. When you say "'+rq+'" I will say: '+ra;
+    if((rm=ra.match(/^(?:all|everything)(?: the)?(?: information| info)?(?: that)?(?: i)?(?: shared| told| gave)?(?: with you| to you)?\s*(?:about|on)\s+(.+)$/i)))
+      return {type:'qa',q:rq,a:'@recall:'+rm[1].trim().trim(),topic:rm[1].trim(),rule:true};
+    return {type:'qa',q:rq,a:ra.trim(),rule:true};
   }
-  if(t.length<=300&&t.indexOf('\n')<0&&((m=t.match(/^q\s*:\s*(.+?)\s+a\s*:\s*(.+)$/i))||(m=t.match(/^(.+?\?)\s+(.+)$/)))){
-    addQA(m[1],m[2]);
-    return 'Learned. When asked "'+m[1]+'" I will say: '+m[2];
+  if(t.length<=300&&t.indexOf('\n')<0&&((m=t.match(/^q\s*:\s*(.+?)\s+a\s*:\s*(.+)$/i))||(m=t.match(/^(.+?\?)\s+(.+)$/))))
+    return {type:'qa',q:m[1].trim(),a:m[2].trim(),rule:false};
+  return {type:'learn'};
+}
+function teachParse(t){
+  var c=teachClassify(t);
+  if(c.type==='skill'){
+    if(!c.trig||!c.steps.length)return 'A skill needs a trigger phrase and at least one step.';
+    brain.skills=brain.skills.filter(function(x){return x.trigger!==c.trig;});
+    brain.skills.push({trigger:c.trig,steps:c.steps});
+    return 'Learned the skill "'+c.trig+'" with '+c.steps.length+(c.steps.length===1?' step':' steps')+'. Use it in Agent mode.';
+  }
+  if(c.type==='qa'){
+    addQA(c.q,c.a);
+    if(c.topic)return 'Learned. When you say "'+c.q+'" I will tell you everything I know about '+c.topic+'.';
+    return c.rule?'Learned. When you say "'+c.q+'" I will say: '+c.a:'Learned. When asked "'+c.q+'" I will say: '+c.a;
   }
   var r=learn(t,'taught');
   return ackStatement(r,null);
@@ -952,6 +1009,71 @@ $('#feed').addEventListener('click',function(e){
     lastTap.n=null;
     try{window.getSelection().removeAllRanges();}catch(x){}
     openAct(node);
+  }else{lastTap.n=node;lastTap.t=now;closeAct();}
+});
+
+/* ---------- delete a lesson in the Computer / Teach screen (double tap) ---------- */
+function lnorm(t){return String(t).toLowerCase().replace(/\s+/g,' ').trim();}
+function dropTaught(text){
+  var keys=new Set(splitSentences(text).map(function(x){return x.toLowerCase();}));
+  brain.sentences=brain.sentences.filter(function(x){return !(keys.has(x.t.toLowerCase())&&(x.src==='taught'||x.src==='told'));});
+}
+/* Undo what one lesson taught. Returns how many things were forgotten. */
+function forgetLesson(m){
+  var t=m.t,removed=0,sb=brain.sentences.length,c=teachClassify(t),fm=t.match(/^Shared file: (.+) \(\d+ KB\)$/);
+  if(fm){
+    brain.sentences=brain.sentences.filter(function(x){return x.src!==fm[1];});
+  }else if(c.type==='skill'){
+    var k0=brain.skills.length,sig=c.steps.join(';');
+    brain.skills=brain.skills.filter(function(x){return !(x.trigger===c.trig&&x.steps.join(';')===sig);});
+    removed+=k0-brain.skills.length;
+  }else if(c.type==='qa'){
+    var nq=norm(c.q),q0=brain.qa.length;
+    brain.qa=brain.qa.filter(function(p){return !(norm(p.q)===nq&&p.a===c.a);});
+    removed+=q0-brain.qa.length;
+    if(c.a.indexOf('@recall:')!==0)dropTaught(c.a);
+  }else{
+    dropTaught(t);
+  }
+  removed+=sb-brain.sentences.length;
+  idx=null;LM=null;
+  if(window.AIMemory){
+    var nt=lnorm(t);
+    window.AIMemory.rules().forEach(function(r){if(lnorm(r.text)===nt)window.AIMemory.forget(r.id);});
+  }
+  return removed;
+}
+function deleteLesson(m){
+  closeAct();
+  var i=brain.lessons.indexOf(m);
+  if(i<0)return;
+  var user=m;
+  if(m.r==='bot'&&i>0&&brain.lessons[i-1].r==='me'){i--;user=brain.lessons[i];}
+  var count=(user.r==='me'&&brain.lessons[i+1]&&brain.lessons[i+1].r==='bot')?2:1;
+  var n=user.r==='me'?forgetLesson(user):0;
+  brain.lessons.splice(i,count);
+  save();renderLessons();renderHeader();renderBrain();renderLists();
+  toast(n?'Deleted and forgot '+n+(n===1?' thing it learned.':' things it learned.'):'Deleted.');
+}
+function openLessonAct(node){
+  closeAct();
+  var m=node._l;if(!m)return;
+  var btns=[
+    h('button',{class:'actbtn danger',type:'button',onclick:function(){deleteLesson(m);}},m.r==='sys'?'Delete':'Delete and forget'),
+    h('button',{class:'actbtn',type:'button',onclick:closeAct},'Cancel')];
+  actBar=h('div',{class:'actbar'+(m.r==='me'?' me':'')},btns);
+  node.after(actBar);
+  var f=$('#lessons');f.scrollTop=f.scrollHeight;
+}
+$('#lessons').addEventListener('click',function(e){
+  if(e.target.closest('.actbar'))return;
+  var node=e.target.closest('.msg');
+  if(!node||!node._l){closeAct();lastTap.n=null;return;}
+  var now=Date.now();
+  if(lastTap.n===node&&now-lastTap.t<400){
+    lastTap.n=null;
+    try{window.getSelection().removeAllRanges();}catch(x){}
+    openLessonAct(node);
   }else{lastTap.n=node;lastTap.t=now;closeAct();}
 });
 
